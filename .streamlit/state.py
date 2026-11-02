@@ -34,6 +34,9 @@ def init():
     S.setdefault("audit", [])        # every AI call, for the downloadable audit trail
     S.setdefault("ai_calls", 0)
     S.setdefault("searches", 0)
+    S.setdefault("cost_usd", 0.0)
+    S.setdefault("chat", [])         # the question box: every question and answer this session
+    S.setdefault("chat_i", 0)
 
 
 def saved(name, default=None):
@@ -60,9 +63,10 @@ def pages():
 
 
 def current_page():
-    if S["page"] in pages() or S["page"] in EXTRA_IDS:
-        return S["page"]
-    return "home"
+    """The page to show. If it is no longer offered (e.g. 'Canadian buyer' after unticking it), go back to Home."""
+    if S["page"] not in pages() and S["page"] not in EXTRA_IDS:
+        S["page"] = "home"
+    return S["page"]
 
 
 def nice_date(yyyymmdd):

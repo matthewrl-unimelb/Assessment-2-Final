@@ -33,7 +33,7 @@ INDEX_PATH = os.path.join(ROOT, "library", "embeddings.npy")
 META_PATH = os.path.join(ROOT, "library", "embeddings_meta.json")
 EMBED_MODEL = "text-embedding-3-large"
 
-MIN_SIMILARITY = 0.25     # meaning search: below this, the best passage is treated as "not about this"
+MIN_SIMILARITY = 0.20     # meaning search: below this, the best passage is treated as "not about this"
 MIN_KEYWORD_SCORE = 4.0   # keyword search: the same idea on the BM25 scale
 
 

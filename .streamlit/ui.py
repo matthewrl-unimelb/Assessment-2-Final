@@ -1,6 +1,6 @@
 """
-ui.py - the look of the app and the small building blocks every page uses
-(tables, coloured status labels, the AI answer box, the left-hand panel with the API key box).
+ui.py - the look of the app and the building blocks every page uses: tables, coloured status labels, the purple
+"written by AI" box, the question box, and the left-hand panel with the OpenAI API key box and the list of steps.
 """
 
 import re
@@ -9,18 +9,8 @@ import streamlit as st
 
 import ai
 import state
+from engine import STATUS  # icon, word and colour for each result: met, not met, newly applies ...
 from state import S
-
-# How each result is shown: icon, word, colour.
-STATUS = {
-    "met": ("✓", "Met", "#1e7d4f"),
-    "warning": ("!", "Inside buffer", "#b26a00"),
-    "review": ("!", "Review", "#b26a00"),
-    "not_met": ("✕", "Not met", "#b42318"),
-    "newly_applies": ("↑", "Newly applies", "#1f3a93"),
-    "applies": ("•", "Already applies", "#5b6474"),
-    "unknown": ("?", "Can't tell", "#6b7280"),
-}
 
 
 # --------------------------------------------------------------------------------------
@@ -105,6 +95,7 @@ div.stButton > button { border-radius:10px; font-weight:600; }
   background:#f5f7fa !important; color:var(--ink) !important; border-color:#d0d5dd !important; }
 [data-baseweb="select"] span, [data-baseweb="select"] div, [data-testid="stSelectbox"] * { color:var(--ink) !important; }
 [data-baseweb="popover"] ul, [data-baseweb="popover"] li, [data-baseweb="menu"] { background:#ffffff !important; color:var(--ink) !important; }
+[data-baseweb="calendar"], [data-baseweb="calendar"] * { background-color:#ffffff; color:var(--ink); }
 [data-testid="stFileUploaderDropzone"] { background:#f5f7fa !important; color:var(--ink) !important; }
 [data-testid="stFileUploaderDropzone"] * { color:var(--ink) !important; }
 /* checkbox ticks and radio dots: navy instead of the default red */
@@ -138,6 +129,11 @@ def badge(ok, text):
     return f'<span class="pill" style="background:{colour}1a;color:{colour}">{icon}&nbsp; {text}</span>'
 
 
+def esc(text):
+    """Make text safe to put inside HTML (AI text and file contents can contain < or &)."""
+    return str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def table(rows, cols, src_col=None):
     """A clean HTML table. rows = list of dicts; values may contain HTML (e.g. pills)."""
     head = "".join(f"<th>{c}</th>" for c in cols)
@@ -155,7 +151,7 @@ def muted(text):
 
 
 ACRONYMS = {"Rbc": "RBC", "Bmo": "BMO", "Td": "TD", "Cibc": "CIBC", "Us": "US", "Usa": "USA", "(Usa)": "(USA)", "Llc": "LLC",
-            "Lp": "LP", "N.a.": "N.A.", "Of": "of", "The": "the", "And": "and"}
+            "Lp": "LP", "N.a.": "N.A.", "Wafd,": "WaFd,", "Of": "of", "The": "the", "And": "and"}
 
 
 def nice_name(name):
@@ -171,17 +167,62 @@ def pct(v):
     return "n/a" if v is None else f"{v:.2f}%"
 
 
+def reported(v):
+    """A ratio for the AI's facts: 'not reported' rather than 'n/a', so it isn't read as 'not applicable'."""
+    return "not reported in the filings" if v is None else f"{v:.2f}%"
+
+
+def ratio_cell(value, status):
+    icon, _, colour = STATUS[status]
+    return f'<span style="color:{colour};font-weight:600">{icon}&nbsp; {pct(value)}</span>'
+
+
+def law(text, passages):
+    """Passage IDs -> real citations, for anything a lawyer will read or copy out."""
+    return ai.cites_to_law(text or "", passages or [])
+
+
 def header(pid):
     order = state.pages()
     n = f"{order.index(pid)} · " if pid in order and pid != "home" else ""
     st.markdown(f"## {n}{state.NAMES[pid]}")
 
 
+def summary_table(rows):
+    table([{"Status": pill(r["status"]), "Check": r["check"], "Detail": r["detail"], "Source": r["src"]} for r in rows],
+          ["Status", "Check", "Detail", "Source"], src_col="Source")
+
+
+def counts(rows):
+    """The four coloured tiles above a results table."""
+    n = {k: 0 for k in STATUS}
+    for r in rows:
+        n[r["status"]] += 1
+    cols = st.columns(4)
+    groups = [("met", ("met",), "Met"), ("not_met", ("not_met",), "Not met"),
+              ("newly_applies", ("newly_applies", "warning"), "Newly applies / in buffer"),
+              ("unknown", ("unknown", "review"), "Can't tell / review")]
+    for col, (k, members, name) in zip(cols, groups):
+        icon, _, colour = STATUS[k]
+        col.markdown(f'<div class="stat"><div class="n" style="color:{colour}">{sum(n[m] for m in members)}</div>'
+                     f'<div class="l">{icon} {name}</div></div>', unsafe_allow_html=True)
+    st.write("")
+
+
+def need_banks():
+    st.info("First choose the two banks on the **Getting started** page.")
+    st.button("Go to Getting started", on_click=state.go, args=("setup",), type="primary")
+
+
 # --------------------------------------------------------------------------------------
 # Showing AI results, and running AI calls (one at a time, or several at once)
 # --------------------------------------------------------------------------------------
 def no_key_note(what="the AI's part of this step"):
-    st.info(f"Add your OpenAI API key in the left-hand panel to see {what}. Everything else works without it.")
+    if ai.key_status() == "bad":
+        st.warning("Your OpenAI key isn't working, so this part can't run yet — check the key in the left-hand panel. "
+                   "Everything else works without it.")
+    else:
+        st.info(f"Add your OpenAI API key in the left-hand panel to see {what}. Everything else works without it.")
 
 
 def run_ai(cache_key, fn, label="Thinking…"):
@@ -237,13 +278,53 @@ def show_ai(result, title, key):
                     else "⚠️ unverified citations were removed" if chk["invalid"] else "no citations")
         st.markdown(f'<span class="ai-tag">✨ Written by AI</span> <span class="muted">&nbsp;{title}{" · " + note if note else ""}</span>',
                     unsafe_allow_html=True)
-        st.markdown(result["text"])
+        # passage IDs ([C41]) become the real citations ((12 CFR 217.10)); the sources are listed underneath
+        st.markdown(law(result["text"], result["passages"]) if result.get("passages") else result["text"])
         if result.get("passages"):
             with st.expander(f"Sources the AI was allowed to use ({len(result['passages'])})"):
                 for p in result["passages"]:
                     st.markdown(f"**[{p['id']}] {p['cite']}** — {p['title']}  \n<span class='muted'>{p['status']} · as of {p['as_of']}</span>",
                                 unsafe_allow_html=True)
                     st.caption(p["text"][:700] + ("…" if len(p["text"]) > 700 else ""))
+
+
+# --------------------------------------------------------------------------------------
+# The question box (from Stage 2): one running Q&A shared by every page
+# --------------------------------------------------------------------------------------
+def chat_box(page, facts):
+    """Answers come only from the library; a second AI call checks each one. ◀ ▶ step through earlier answers."""
+    st.markdown("### Ask a question")
+    muted("Answers come only from the regulations loaded into this app, and a second AI call checks each one.")
+    with st.form(key=f"chatform_{page}", clear_on_submit=True, border=False):
+        c1, c2 = st.columns([5, 1])
+        q = c1.text_input("Question", label_visibility="collapsed", placeholder="e.g. What does the stress capital buffer do?")
+        sent = c2.form_submit_button("Ask", type="primary", width="stretch")
+    if sent and q.strip():
+        if not ai.ready():
+            no_key_note("an answer")
+        else:
+            with st.spinner("Searching the regulations, answering, then checking the answer…"):
+                try:
+                    ans = ai.ask(page, q.strip(), facts, state.lib())
+                    S["chat"].append({"q": q.strip(), "a": ans, "page": page})
+                    S["chat_i"] = len(S["chat"]) - 1
+                except Exception as exc:
+                    st.error("The question could not be answered: " + ai.friendly_error(exc))
+    if S["chat"]:
+        i = min(S["chat_i"], len(S["chat"]) - 1)
+        item = S["chat"][i]
+        c1, c2, c3 = st.columns([1, 3, 1])
+        c1.button("◀  Older", key=f"older_{page}", disabled=i == 0, on_click=lambda: S.update(chat_i=i - 1), width="stretch")
+        c2.markdown(f"<div style='text-align:center;padding-top:8px' class='muted'>Question {i + 1} of {len(S['chat'])}</div>",
+                    unsafe_allow_html=True)
+        c3.button("Newer  ▶", key=f"newer_{page}", disabled=i == len(S["chat"]) - 1, on_click=lambda: S.update(chat_i=i + 1),
+                  width="stretch")
+        st.markdown(f"**Q: {item['q']}**")
+        show_ai(item["a"], "Answer" + ("" if item["a"].get("verified") else " · not fully confirmed by the checker"), f"chat_{page}")
+        if item["a"].get("trail"):
+            with st.expander("How this answer was checked"):
+                for t in item["a"]["trail"]:
+                    st.write("• " + t)
 
 
 # --------------------------------------------------------------------------------------
@@ -293,8 +374,10 @@ def sidebar():
 
 
 def show_counter(slot):
+    cost = S.get("cost_usd", 0.0)
     slot.markdown(f'<span class="muted">AI calls this session: <b>{S.get("ai_calls", 0)}</b> · '
-                  f'library searches: <b>{S.get("searches", 0)}</b></span>', unsafe_allow_html=True)
+                  f'library searches: <b>{S.get("searches", 0)}</b><br>'
+                  f'OpenAI cost so far: about <b>US${cost:.2f}</b></span>', unsafe_allow_html=True)
 
 
 def nav_buttons(can_continue=True):
