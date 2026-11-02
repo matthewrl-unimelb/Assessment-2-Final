@@ -121,18 +121,18 @@ def render():
     if P:
         fig = P["fig"]
         st.markdown(f'<span class="ai-tag">✨ Read by AI</span>&nbsp; from page(s) {", ".join(map(str, P["pages"]))} of the Pillar 3 '
-                    'report. You can correct any figure in the table.', unsafe_allow_html=True)
+                    'report. You can correct any figure below (hover over the ⓘ to see the row the AI read).', unsafe_allow_html=True)
         keys = ai.AMOUNT_FIELDS + ("cet1_ratio", "leverage_ratio")
-        edit = pd.DataFrame([{"Figure": ai.PARENT_FIELDS[k].split(" (")[0], "C$ millions / %": fig[k]["value"],
-                              "Where the AI found it": fig[k]["found_as"]} for k in keys])
-        edit["C$ millions / %"] = pd.to_numeric(edit["C$ millions / %"], errors="coerce")     # always a number column
-        edited = st.data_editor(edit, hide_index=True, width="stretch", disabled=["Figure", "Where the AI found it"],
-                                key="parent_editor")
         changed = False
-        for k, val in zip(keys, edited["C$ millions / %"]):
-            new = None if pd.isna(val) else float(val)
-            if new != fig[k]["value"]:
-                fig[k]["value"], changed = new, True
+        cols = st.columns(4)
+        for i, k in enumerate(keys):
+            ratio = k in ("cet1_ratio", "leverage_ratio")
+            label = ai.PARENT_FIELDS[k].split(" (")[0] + (" (%)" if ratio else " (C$m)")
+            val = cols[i % 4].number_input(label, min_value=0.0, value=fig[k]["value"], step=0.01 if ratio else 1.0,
+                                           format="%.2f" if ratio else "%.0f", key=f"p3_{k}_{saved('parent_src')}",
+                                           help=("The AI read: " + fig[k]["found_as"]) if fig[k]["found_as"] else "Not found by the AI.")
+            if val != fig[k]["value"]:
+                fig[k]["value"], changed = val, True
         if changed:
             st.rerun()
         st.markdown('<span class="code-tag">✓ Checked without AI</span>&nbsp; ' + " · ".join(
